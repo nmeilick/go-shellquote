@@ -13,16 +13,31 @@ var (
 	UnterminatedEscapeError      = errors.New("Unterminated backslash-escape")
 )
 
+const (
+	DefaultSplitChars = " \n\t"
+)
+
+type SplitOptions struct {
+	SplitChars string
+	Limit      int
+}
+
+var defaultSplitOptions = SplitOptions{
+	SplitChars: DefaultSplitChars,
+	//SkipAdjacent: false,
+	Limit: -1,
+}
+
 var (
-	splitChars        = " \n\t"
 	singleChar        = '\''
 	doubleChar        = '"'
 	escapeChar        = '\\'
 	doubleEscapeChars = "$`\"\n\\"
 )
 
-// Split splits a string according to /bin/sh's word-splitting rules. It
-// supports backslash-escapes, single-quotes, and double-quotes. Notably it does
+// SplitWithOptions splits a string according to /bin/sh's word-splitting rules and
+// the options given.
+// It supports backslash-escapes, single-quotes, and double-quotes. Notably it does
 // not support the $'' style of quoting. It also doesn't attempt to perform any
 // other sort of expansion, including brace expansion, shell expansion, or
 // pathname expansion.
@@ -30,7 +45,29 @@ var (
 // If the given input has an unterminated quoted string or ends in a
 // backslash-escape, one of UnterminatedSingleQuoteError,
 // UnterminatedDoubleQuoteError, or UnterminatedEscapeError is returned.
-func Split(input string) (words []string, err error) {
+func SplitWithOptions(input string, opts *SplitOptions) (words []string, err error) {
+	if opts == nil {
+		opts = &defaultSplitOptions
+	}
+
+	splitChars := opts.SplitChars
+	if len(splitChars) == 0 {
+		splitChars = DefaultSplitChars
+	}
+
+	switch opts.Limit {
+	case 0:
+		words = []string{}
+		return
+	case 1:
+		words = []string{}
+		input = strings.TrimLeft(strings.TrimRight(input, splitChars), splitChars)
+		if len(input) > 0 {
+			words = append(words, input)
+		}
+		return
+	}
+
 	var buf bytes.Buffer
 	words = make([]string, 0)
 
@@ -55,16 +92,33 @@ func Split(input string) (words []string, err error) {
 		}
 
 		var word string
-		word, input, err = splitWord(input, &buf)
+		word, input, err = splitWord(input, &buf, opts)
 		if err != nil {
 			return
 		}
 		words = append(words, word)
+		if opts.Limit == len(words)+1 {
+			input = strings.TrimSpace(input)
+			if len(input) > 0 {
+				words = append(words, input)
+			}
+			return
+		}
 	}
 	return
 }
 
-func splitWord(input string, buf *bytes.Buffer) (word string, remainder string, err error) {
+func Split(input string) (words []string, err error) {
+	return SplitWithOptions(input, &defaultSplitOptions)
+}
+
+func SplitN(input string, n int) (words []string, err error) {
+	opts := *&defaultSplitOptions
+	opts.Limit = n
+	return SplitWithOptions(input, &opts)
+}
+
+func splitWord(input string, buf *bytes.Buffer, opts *SplitOptions) (word string, remainder string, err error) {
 	buf.Reset()
 
 raw:
@@ -85,7 +139,7 @@ raw:
 				buf.WriteString(input[0 : len(input)-len(cur)-l])
 				input = cur
 				goto escape
-			} else if strings.ContainsRune(splitChars, c) {
+			} else if strings.ContainsRune(opts.SplitChars, c) {
 				buf.WriteString(input[0 : len(input)-len(cur)-l])
 				return buf.String(), cur, nil
 			}
