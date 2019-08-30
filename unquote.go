@@ -14,26 +14,38 @@ var (
 )
 
 const (
-	DefaultSplitChars = " \n\t"
+	DefaultSplitChars        = " \n\t"
+	DefaultSingleChar        = '\''
+	DefaultDoubleChar        = '"'
+	DefaultEscapeChar        = '\\'
+	DefaultDoubleEscapeChars = "$`\"\n\\"
 )
 
 type SplitOptions struct {
-	SplitChars string
-	Limit      int
+	SplitChars        string
+	SingleChar        rune
+	DoubleChar        rune
+	EscapeChar        rune
+	DoubleEscapeChars string
+	Limit             int
 }
 
-var defaultSplitOptions = SplitOptions{
-	SplitChars: DefaultSplitChars,
-	//SkipAdjacent: false,
-	Limit: -1,
+func DefaultSplitOptions() *SplitOptions {
+	return &SplitOptions{
+		SplitChars:        DefaultSplitChars,
+		SingleChar:        DefaultSingleChar,
+		DoubleChar:        DefaultDoubleChar,
+		EscapeChar:        DefaultEscapeChar,
+		DoubleEscapeChars: DefaultDoubleEscapeChars,
+		Limit:             -1,
+	}
 }
 
-var (
-	singleChar        = '\''
-	doubleChar        = '"'
-	escapeChar        = '\\'
-	doubleEscapeChars = "$`\"\n\\"
-)
+func NoEscapeSplitOptions() *SplitOptions {
+	opts := DefaultSplitOptions()
+	opts.EscapeChar = 0
+	return opts
+}
 
 // SplitWithOptions splits a string according to /bin/sh's word-splitting rules and
 // the options given.
@@ -47,7 +59,7 @@ var (
 // UnterminatedDoubleQuoteError, or UnterminatedEscapeError is returned.
 func SplitWithOptions(input string, opts *SplitOptions) (words []string, err error) {
 	if opts == nil {
-		opts = &defaultSplitOptions
+		opts = DefaultSplitOptions()
 	}
 
 	splitChars := opts.SplitChars
@@ -77,7 +89,7 @@ func SplitWithOptions(input string, opts *SplitOptions) (words []string, err err
 		if strings.ContainsRune(splitChars, c) {
 			input = input[l:]
 			continue
-		} else if c == escapeChar {
+		} else if c == opts.EscapeChar {
 			// Look ahead for escaped newline so we can skip over it
 			next := input[l:]
 			if len(next) == 0 {
@@ -109,13 +121,13 @@ func SplitWithOptions(input string, opts *SplitOptions) (words []string, err err
 }
 
 func Split(input string) (words []string, err error) {
-	return SplitWithOptions(input, &defaultSplitOptions)
+	return SplitWithOptions(input, DefaultSplitOptions())
 }
 
 func SplitN(input string, n int) (words []string, err error) {
-	opts := *&defaultSplitOptions
+	opts := DefaultSplitOptions()
 	opts.Limit = n
-	return SplitWithOptions(input, &opts)
+	return SplitWithOptions(input, opts)
 }
 
 func splitWord(input string, buf *bytes.Buffer, opts *SplitOptions) (word string, remainder string, err error) {
@@ -127,15 +139,15 @@ raw:
 		for len(cur) > 0 {
 			c, l := utf8.DecodeRuneInString(cur)
 			cur = cur[l:]
-			if c == singleChar {
+			if c == opts.SingleChar {
 				buf.WriteString(input[0 : len(input)-len(cur)-l])
 				input = cur
 				goto single
-			} else if c == doubleChar {
+			} else if c == opts.DoubleChar {
 				buf.WriteString(input[0 : len(input)-len(cur)-l])
 				input = cur
 				goto double
-			} else if c == escapeChar {
+			} else if c == opts.EscapeChar {
 				buf.WriteString(input[0 : len(input)-len(cur)-l])
 				input = cur
 				goto escape
@@ -168,7 +180,7 @@ escape:
 
 single:
 	{
-		i := strings.IndexRune(input, singleChar)
+		i := strings.IndexRune(input, opts.SingleChar)
 		if i == -1 {
 			return "", "", UnterminatedSingleQuoteError
 		}
@@ -183,15 +195,15 @@ double:
 		for len(cur) > 0 {
 			c, l := utf8.DecodeRuneInString(cur)
 			cur = cur[l:]
-			if c == doubleChar {
+			if c == opts.DoubleChar {
 				buf.WriteString(input[0 : len(input)-len(cur)-l])
 				input = cur
 				goto raw
-			} else if c == escapeChar {
+			} else if c == opts.EscapeChar {
 				// bash only supports certain escapes in double-quoted strings
 				c2, l2 := utf8.DecodeRuneInString(cur)
 				cur = cur[l2:]
-				if strings.ContainsRune(doubleEscapeChars, c2) {
+				if strings.ContainsRune(opts.DoubleEscapeChars, c2) {
 					buf.WriteString(input[0 : len(input)-len(cur)-l-l2])
 					if c2 == '\n' {
 						// newline is special, skip the backslash entirely
